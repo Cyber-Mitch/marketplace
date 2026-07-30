@@ -28,6 +28,27 @@ function createEmptyBeneficiary(nextId: number): Beneficiary {
   return { id: nextId, address: "", percentage: "" };
 }
 
+/**
+ * Split 100% as evenly as possible across `count` recipients using whole
+ * numbers. The leftover from integer division is handed to the first rows one
+ * point at a time, so the result always sums to exactly 100 (e.g. 3 → 34/33/33,
+ * 4 → 25/25/25/25, 6 → 17/17/17/17/16/16).
+ */
+function evenSplitPercentages(count: number): string[] {
+  if (count <= 0) return [];
+  const base = Math.floor(100 / count);
+  const remainder = 100 - base * count;
+  return Array.from({ length: count }, (_, i) =>
+    String(i < remainder ? base + 1 : base),
+  );
+}
+
+/** Overwrite every beneficiary's percentage with an even split, keeping addresses. */
+function applyEvenSplit(beneficiaries: Beneficiary[]): Beneficiary[] {
+  const shares = evenSplitPercentages(beneficiaries.length);
+  return beneficiaries.map((b, i) => ({ ...b, percentage: shares[i] }));
+}
+
 function validatePercentages(
   beneficiaries: Beneficiary[],
 ): string | null {
@@ -57,15 +78,21 @@ export default function SplitterPage() {
   const { publicKey } = useWalletContext();
   const { deploy, isDeploying, error } = useDeploySplitter(publicKey);
   const [beneficiaries, setBeneficiaries] = useState<Beneficiary[]>([
-    createEmptyBeneficiary(0),
+    { ...createEmptyBeneficiary(0), percentage: "100" },
   ]);
   const [nextId, setNextId] = useState(1);
+  // While true, adding/removing a recipient re-spreads the split evenly. The
+  // first manual percentage edit hands control to the user and turns this off.
+  const [autoSplit, setAutoSplit] = useState(true);
   const [validationError, setValidationError] = useState<string | null>(null);
   const [deployedAddress, setDeployedAddress] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
   const addBeneficiary = () => {
-    setBeneficiaries((prev) => [...prev, createEmptyBeneficiary(nextId)]);
+    setBeneficiaries((prev) => {
+      const next = [...prev, createEmptyBeneficiary(nextId)];
+      return autoSplit ? applyEvenSplit(next) : next;
+    });
     setNextId((n) => n + 1);
     setValidationError(null);
   };
@@ -73,7 +100,8 @@ export default function SplitterPage() {
   const removeBeneficiary = (id: number) => {
     setBeneficiaries((prev) => {
       if (prev.length <= 1) return prev;
-      return prev.filter((b) => b.id !== id);
+      const next = prev.filter((b) => b.id !== id);
+      return autoSplit ? applyEvenSplit(next) : next;
     });
     setValidationError(null);
   };
@@ -83,6 +111,11 @@ export default function SplitterPage() {
     field: "address" | "percentage",
     value: string,
   ) => {
+    // A manual percentage edit means the user is taking over the split; stop
+    // auto-distributing so their custom values are preserved.
+    if (field === "percentage") {
+      setAutoSplit(false);
+    }
     setBeneficiaries((prev) =>
       prev.map((b) => (b.id === id ? { ...b, [field]: value } : b)),
     );
@@ -123,8 +156,9 @@ export default function SplitterPage() {
   };
 
   const resetForm = () => {
-    setBeneficiaries([createEmptyBeneficiary(0)]);
+    setBeneficiaries([{ ...createEmptyBeneficiary(0), percentage: "100" }]);
     setNextId(1);
+    setAutoSplit(true);
     setDeployedAddress(null);
     setValidationError(null);
   };

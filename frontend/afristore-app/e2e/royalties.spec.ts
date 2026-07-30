@@ -80,4 +80,47 @@ test.describe("Royalties Splitter", () => {
       ],
     });
   });
+
+  test("#537: adding a recipient calculates an initial even split", async ({
+    page,
+  }) => {
+    await page.goto("/dashboard/splitter");
+    await expect(
+      page.getByRole("heading", { name: "Create Royalty Splitter" }),
+    ).toBeVisible({ timeout: 15_000 });
+
+    const percentages = page.locator('input[type="number"]');
+    const addButton = page.getByRole("button", { name: "Add", exact: true });
+
+    const expectShares = async (shares: string[]) => {
+      await expect(percentages).toHaveCount(shares.length);
+      for (let i = 0; i < shares.length; i++) {
+        await expect(percentages.nth(i)).toHaveValue(shares[i]);
+      }
+    };
+
+    // A single recipient owns the whole split.
+    await expectShares(["100"]);
+
+    // Two recipients split evenly, 50/50.
+    await addButton.click();
+    await expectShares(["50", "50"]);
+
+    // Three recipients: the indivisible remainder is handed to the first row.
+    await addButton.click();
+    await expectShares(["34", "33", "33"]);
+
+    // Four recipients split cleanly, 25 each, still summing to 100%.
+    await addButton.click();
+    await expectShares(["25", "25", "25", "25"]);
+    await expect(page.getByText("100%", { exact: true })).toBeVisible();
+
+    // Once the user edits a percentage, auto-split yields: the custom value is
+    // preserved and a further "Add" appends a blank row instead of re-splitting.
+    await percentages.first().fill("40");
+    await addButton.click();
+    await expect(percentages).toHaveCount(5);
+    await expect(percentages.first()).toHaveValue("40");
+    await expect(percentages.nth(4)).toHaveValue("");
+  });
 });
